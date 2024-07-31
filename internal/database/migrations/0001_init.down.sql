@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS project_assignments;
+DROP TABLE IF EXISTS projects;
+DROP TABLE IF EXISTS operators;
+DROP EXTENSION IF EXISTS "uuid-ossp";
