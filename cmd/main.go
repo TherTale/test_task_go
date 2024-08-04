@@ -3,6 +3,7 @@ package main
 import (
 	"contact-center-system/internal/database"
 	"contact-center-system/internal/handlers"
+	"contact-center-system/internal/models"
 	routes "contact-center-system/internal/router"
 	"database/sql"
 	"github.com/gin-gonic/gin"
@@ -39,7 +40,6 @@ func migrateDatabase(dsn string) {
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 		log.Fatalf("Ошибка при выполнении миграции: %v", err)
 	}
-
 	log.Println("Миграции успешно выполнены")
 }
 
@@ -52,16 +52,18 @@ func main() {
 
 	// Подключаемся к базе данных
 	db := database.ConnectDB()
+	db.RegisterModel((*models.ProjectAssignment)(nil))
 	defer db.Close()
 
 	operatorHandler := handlers.NewOperatorHandler(db)
+	projectHandler := handlers.NewProjectHandler(db)
 
 	// Инициализируем роутер Gin
 	router := gin.Default()
 
 	// Регистрируем маршруты
 	routes.RegisterOperatorRoutes(router, operatorHandler)
-	routes.RegisterProjectRoutes(router)
+	routes.RegisterProjectRoutes(router, projectHandler)
 
 	// Запускаем сервер
 	if err := router.Run(":8080"); err != nil {

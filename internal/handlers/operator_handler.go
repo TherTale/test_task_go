@@ -3,9 +3,9 @@ package handlers
 import (
 	"contact-center-system/internal/models"
 	"contact-center-system/internal/services"
+	"contact-center-system/pkg"
 	"context"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 	"net/http"
 	_ "strings"
@@ -21,9 +21,13 @@ func NewOperatorHandler(db *bun.DB) *OperatorHandler {
 
 func (h *OperatorHandler) GetOperators(c *gin.Context) {
 	var operators []models.Operator
-	err := h.DB.NewSelect().Model(&operators).Order("first_name ASC").Scan(context.Background())
+	err := h.DB.NewSelect().
+		Model(&operators).
+		Relation("Projects").
+		Order("first_name ASC").
+		Scan(context.Background())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch operators"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Ошибка получения оператора"})
 		return
 	}
 	c.JSON(http.StatusOK, operators)
@@ -31,101 +35,65 @@ func (h *OperatorHandler) GetOperators(c *gin.Context) {
 
 func (h *OperatorHandler) CreateOperators(c *gin.Context) {
 	var input models.Operator
-
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input data"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err})
 		return
 	}
-
-	if err := services.ValidateOperator(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	generatedPassword := services.GeneratePassword(10) // Длина пароля 10 символов
+	passLength := 10
+	generatedPassword := services.GeneratePassword(passLength)
 	hashedPassword, err := services.HashPassword(generatedPassword)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
-		return
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 	}
 	input.Password = hashedPassword
 	_, err = h.DB.NewInsert().Model(&input).Exec(context.Background())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create operator"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	}
-
 	c.JSON(http.StatusCreated, gin.H{
 		"message":  "Operator created successfully",
-		"password": generatedPassword, // Отправляем сгенерированный пароль пользователю
+		"password": generatedPassword,
 	})
-
 }
 
 func (h *OperatorHandler) PutOperators(c *gin.Context) {
 	var input models.Operator
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Неверные входные данные"})
-		return
-	}
-	if err := services.ValidateOperator(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	operatorID := c.Param("id")
-	id, err := uuid.Parse(operatorID)
+	id, err := pkg.ParseUUIDParam(c, "id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Неверный ID оператора"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	var operator models.Operator
-	err = h.DB.NewSelect().Model(&operator).Where("id = ?", id).Scan(context.Background())
+	result, err := h.DB.NewUpdate().
+		Model(&input).
+		Column(input.GetUpdateFields()...).
+		Where("id = ?", id).
+		Exec(context.Background())
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Оператор не найден"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	operator.City = input.City
-	operator.PhoneNumber = input.PhoneNumber
-	operator.FirstName = input.FirstName
-	operator.LastName = input.LastName
-	operator.Email = input.Email
-	operator.MiddleName = input.MiddleName
-
-	_, err = h.DB.NewUpdate().Model(&operator).Where("id = ?", operator.ID).Exec(context.Background())
+	err = pkg.CheckUpdatedRows(result)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить оператора"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
 	c.JSON(http.StatusOK, gin.H{"message": "Оператор успешно обновлён"})
 }
 
 func (h *OperatorHandler) DeleteOperators(c *gin.Context) {
-	operatorID := c.Param("id")
-	id, err := uuid.Parse(operatorID)
+	id, err := pkg.ParseUUIDParam(c, "id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Неверный ID оператора"})
 		return
 	}
-
-	result, err := h.DB.NewDelete().Model(&models.Operator{}).Where("id = ?", id).Exec(context.Background())
+	err = pkg.DeleteByID(h.DB, &models.Operator{}, id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось удалить оператора"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err})
 		return
 	}
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Ошибка при проверке удаления оператора"})
-		return
-	}
-
-	if rowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Оператор не найден"})
-		return
-	}
-
 	c.JSON(http.StatusOK, gin.H{"message": "Оператор успешно удалён"})
 }
